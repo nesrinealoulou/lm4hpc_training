@@ -1,17 +1,10 @@
-# -------------------- Cell --------------------
 import json
 from datasets import Dataset, DatasetDict
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-
 # Load JSON data and ensure all prompts are strings
 with open('../data_preprocessing/simple_prompt.json', 'r') as file:
     data = json.load(file)
-
 print(data[:1])
-
-
-
-
 # -------------------- Cell --------------------
 def convert_prompt_to_format(data):
     result = []
@@ -107,8 +100,8 @@ dataset = Dataset.from_dict({
     'response': [item['response'] for item in data],
 })
 print(dataset[0])
-# -------------------- Cell --------------------
-device_map="FSDP"
+
+
 # -------------------- Cell --------------------
 # Split into train and test datasets
 train_test_split = dataset.train_test_split(test_size=0.2)  # Adjust test_size as needed
@@ -162,39 +155,29 @@ lora_config = LoraConfig(
 
 # -------------------- Cell --------------------
 from transformers import TrainingArguments
-max_seq_length = 512
-output_dir = "./results"
-per_device_train_batch_size = 8
-gradient_accumulation_steps = 2
-optim = "adamw_torch"
-save_steps = 10
-logging_steps = 1
-learning_rate = 2e-4
-max_grad_norm = 0.3
-max_steps = 1
-warmup_ratio = 0.1
-lr_scheduler_type = "cosine"
-training_arguments = TrainingArguments(
-    output_dir=output_dir,
-    per_device_train_batch_size=per_device_train_batch_size,
-    gradient_accumulation_steps=gradient_accumulation_steps,
-    optim=optim,
-    save_steps=save_steps,
-    logging_steps=logging_steps,
-    learning_rate=learning_rate,
+
+training_args = TrainingArguments(
+    output_dir="./results",
+    dataloader_drop_last=True,
+    evaluation_strategy="epoch",
+    save_strategy="epoch",
+    num_train_epochs=10,
+    logging_steps=5,
+    per_device_train_batch_size=4,
+    learning_rate=1e-4,
+    lr_scheduler_type="cosine",
+    warmup_steps=10,
+    gradient_accumulation_steps=1,
     bf16=True,
-    max_grad_norm=max_grad_norm,
-    max_steps=max_steps,
-    warmup_ratio=warmup_ratio,
-    group_by_length=True,
-    lr_scheduler_type=lr_scheduler_type,
-    gradient_checkpointing=True,
-    gradient_checkpointing_kwargs = {"use_reentrant": True},
+    weight_decay=0.05,
+    run_name="data_race_llama2_lora",
     report_to="wandb",
 )
+
 # -------------------- Cell --------------------
 from transformers import AutoModelForCausalLM
 model = AutoModelForCausalLM.from_pretrained('meta-llama/Llama-2-7b-hf',torch_dtype=torch.bfloat16)
+
 # -------------------- Cell --------------------
 import wandb
 wandb.init(
@@ -204,8 +187,10 @@ wandb.init(
     resume="allow",
     mode="online"
 )
+
 # -------------------- Cell --------------------
 from trl import SFTTrainer
+
 trainer = SFTTrainer(
     model=model,
     args=training_args,
@@ -214,16 +199,11 @@ trainer = SFTTrainer(
     peft_config=lora_config,
     packing=True,
 )
-# -------------------- Cell --------------------
-# handle PEFT+FSDP case
-trainer.model.print_trainable_parameters()
-if getattr(trainer.accelerator.state, "fsdp_plugin", None):
-    from peft.utils.other import fsdp_auto_wrap_policy
 
-    fsdp_plugin = trainer.accelerator.state.fsdp_plugin
-    fsdp_plugin.auto_wrap_policy = fsdp_auto_wrap_policy(trainer.model)
 # -------------------- Cell --------------------
 print("Training...")
 trainer.train()
 print("Training complete")
+
 # -------------------- Cell --------------------
+
